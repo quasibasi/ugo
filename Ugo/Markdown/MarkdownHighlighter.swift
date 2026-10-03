@@ -50,6 +50,16 @@ final class BlockInfo: NSObject {
 
 extension NSAttributedString.Key {
     static let ugoBlock = NSAttributedString.Key("app.ugo.block")
+    /// The URL of a Markdown link, set on its label.
+    static let ugoLink = NSAttributedString.Key("app.ugo.link")
+}
+
+/// A `[label](url)` link in the text.
+struct MarkdownLink: Equatable {
+    /// The whole link, brackets and URL included.
+    let range: NSRange
+    let label: NSRange
+    let url: String
 }
 
 /// Fonts, colors and spacing for the editor, built once per font size.
@@ -71,6 +81,10 @@ struct MarkdownTheme {
     let caret: PlatformColor
     let quote: PlatformColor
     let link: PlatformColor
+    /// The thick underline under a link label, a translucent accent.
+    let linkUnderline: PlatformColor
+    /// The same underline while the pointer is over the link.
+    let linkUnderlineHover: PlatformColor
     let codeBackground: PlatformColor
     let checkboxBorder: PlatformColor
     let hairline: PlatformColor
@@ -101,6 +115,8 @@ struct MarkdownTheme {
             hairline = PlatformColor(hex: palette.hairline)
             quoteBar = PlatformColor(hex: palette.quoteBar)
             caret = PlatformColor(hex: palette.caret)
+            linkUnderline = accent.withAlphaComponent(0.35)
+            linkUnderlineHover = accent
         } else {
             #if os(macOS)
             text = .labelColor
@@ -113,6 +129,8 @@ struct MarkdownTheme {
             codeBackground = NSColor(name: nil) { _ in NSColor.labelColor.withAlphaComponent(0.07) }
             checkboxBorder = NSColor(name: nil) { _ in NSColor.labelColor.withAlphaComponent(0.4) }
             hairline = NSColor(name: nil) { _ in NSColor.labelColor.withAlphaComponent(0.15) }
+            linkUnderline = NSColor(name: nil) { _ in NSColor.controlAccentColor.withAlphaComponent(0.4) }
+            linkUnderlineHover = .controlAccentColor
             #else
             text = .label
             marker = .tertiaryLabel
@@ -122,6 +140,8 @@ struct MarkdownTheme {
             codeBackground = UIColor { _ in UIColor.label.withAlphaComponent(0.07) }
             checkboxBorder = UIColor { _ in UIColor.label.withAlphaComponent(0.4) }
             hairline = UIColor { _ in UIColor.label.withAlphaComponent(0.15) }
+            linkUnderline = UIColor { _ in UIColor.tintColor.withAlphaComponent(0.4) }
+            linkUnderlineHover = .tintColor
             #endif
             heading = text
             onAccent = .white
@@ -156,6 +176,8 @@ struct MarkdownTheme {
 @MainActor
 final class MarkdownHighlighter {
     private(set) var theme: MarkdownTheme
+    /// The caret location. A link shows its brackets and URL only while the caret is inside it.
+    var caret: Int?
     private var indentStyles: [String: NSParagraphStyle] = [:]
 
     init(theme: MarkdownTheme) {
@@ -180,6 +202,16 @@ final class MarkdownHighlighter {
     private static let italic = rx(#"(?<![\w*_])([*_])(?=[^\s*_])(.+?)(?<=[^\s*_])\1(?![\w*_])"#)
     private static let strike = rx(#"~~(?=\S)(.+?)(?<=\S)~~"#)
     private static let link = rx(#"\[([^\[\]\n]+)\]\(([^)\s]+)\)"#)
+
+    /// The link the location falls strictly inside, so a caret just before or after it doesn't count.
+    static func link(in ns: NSString, at location: Int) -> MarkdownLink? {
+        guard location <= ns.length else { return nil }
+        let line = ns.lineRange(for: NSRange(location: min(location, ns.length), length: 0))
+        for m in link.matches(in: ns as String, range: line) where location > m.range.location && location < NSMaxRange(m.range) {
+            return MarkdownLink(range: m.range, label: m.range(at: 1), url: ns.substring(with: m.range(at: 2)))
+        }
+        return nil
+    }
 
     private static func rx(_ pattern: String) -> NSRegularExpression {
         // swiftlint:disable:next force_try
@@ -416,9 +448,22 @@ final class MarkdownHighlighter {
         }
         for m in Self.link.matches(in: string, range: range) where isFree(m.range) {
             let label = m.range(at: 1)
-            storage.addAttributes([.foregroundColor: theme.link, .underlineStyle: NSUnderlineStyle.single.rawValue], range: label)
-            marker(storage, NSRange(location: m.range.location, length: 1), revealed: revealed)
-            marker(storage, NSRange(location: NSMaxRange(label), length: NSMaxRange(m.range) - NSMaxRange(label)), revealed: revealed)
+            let url = (string as NSString).substring(with: m.range(at: 2))
+            storage.addAttributes([.underlineStyle: NSUnderlineStyle.thick.rawValue, .underlineColor: theme.linkUnderline, .ugoLink: url], range: label)
+            storage.enumerateAttribute(.font, in: label, options: []) { value, r, _ in
+                let font = (value as? PlatformFont) ?? theme.body
+                storage.addAttribute(.font, value: font.medium(), range: r)
+            }
+            // The URL stays out of the way unless the caret is inside the link.
+            let open = caret.map { $0 > m.range.location && $0 < NSMaxRange(m.range) } ?? false
+            let tail = NSRange(location: NSMaxRange(label), length: NSMaxRange(m.range) - NSMaxRange(label))
+            marker(storage, NSRange(location: m.range.location, length: 1), revealed: open)
+            marker(storage, tail, revealed: open)
+            if !open {
+                // Even in the tiny hidden font a long URL leaves a gap after the label.
+                let width = NSAttributedString(string: (string as NSString).substring(with: tail), attributes: theme.hiddenMarker).size().width
+                storage.addAttribute(.kern, value: -width / CGFloat(tail.length), range: tail)
+            }
         }
     }
 
@@ -488,6 +533,21 @@ final class MarkdownHighlighter {
 }
 
 extension PlatformFont {
+    /// The medium weight of the font, unless it is bold already. Keeps italic.
+    func medium() -> PlatformFont {
+        #if os(macOS)
+        let traits = fontDescriptor.symbolicTraits
+        guard !traits.contains(.bold) else { return self }
+        let font = NSFont.systemFont(ofSize: pointSize, weight: .medium)
+        return traits.contains(.italic) ? font.adding(bold: false, italic: true) : font
+        #else
+        let traits = fontDescriptor.symbolicTraits
+        guard !traits.contains(.traitBold) else { return self }
+        let font = UIFont.systemFont(ofSize: pointSize, weight: .medium)
+        return traits.contains(.traitItalic) ? font.adding(bold: false, italic: true) : font
+        #endif
+    }
+
     func adding(bold: Bool, italic: Bool) -> PlatformFont {
         #if os(macOS)
         var traits = fontDescriptor.symbolicTraits

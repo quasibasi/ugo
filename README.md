@@ -60,6 +60,9 @@ same folder are skipped.
 | Next or previous section in section zen | ⌥⌘↓ and ⌥⌘↑ |
 | Present the note full screen, a slide per `#` and `##` heading | ⇧⌘P |
 | Find inside a note | ⌘F |
+| Link the selected text, or change the link the caret is in (empty URL removes it) | ⌘K |
+| Link the selected text by pasting a URL over it | ⌘V |
+| Open a link | ⌘-click |
 | Move the highlighted note to the trash | ⌫ with the sidebar focused |
 | Move the highlighted folder and its notes to the trash | ⌫ with the sidebar focused |
 | Open favourite note 1 to 9 | ⌘0 … ⌘8 |

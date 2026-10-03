@@ -115,6 +115,8 @@ struct MarkdownEditor: NSViewRepresentable {
         var focusToken = 0
         private var pendingEdit: (range: NSRange, forceToEnd: Bool)?
         private var revealedRange: NSRange?
+        /// The link the caret is inside, whose brackets and URL are shown.
+        private var revealedLink: NSRange?
 
         init(text: Binding<String>, theme: MarkdownTheme) {
             self.text = text
@@ -132,7 +134,18 @@ struct MarkdownEditor: NSViewRepresentable {
         func highlightAll() {
             guard let storage = textView?.textStorage else { return }
             revealedRange = caretParagraph()
+            trackCaret()
             highlighter.highlightAll(storage, revealed: revealedRange)
+        }
+
+        /// Hands the caret to the highlighter and returns the link it is inside.
+        @discardableResult
+        private func trackCaret() -> NSRange? {
+            guard let textView else { return nil }
+            let caret = textView.selectedRange().location
+            highlighter.caret = caret
+            revealedLink = MarkdownHighlighter.link(in: textView.string as NSString, at: caret)?.range
+            return revealedLink
         }
 
         // MARK: NSTextViewDelegate
@@ -152,6 +165,7 @@ struct MarkdownEditor: NSViewRepresentable {
             lastPushed = string
             text.wrappedValue = string
             revealedRange = caretParagraph()
+            trackCaret()
             if let storage = textView.textStorage {
                 if let edit = pendingEdit {
                     highlighter.highlight(storage, editedRange: edit.range, forceToEnd: edit.forceToEnd, revealed: revealedRange)
@@ -165,7 +179,9 @@ struct MarkdownEditor: NSViewRepresentable {
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView, let storage = textView.textStorage else { return }
             let paragraph = caretParagraph()
-            guard paragraph != revealedRange else { return }
+            let previousLink = revealedLink
+            let link = trackCaret()
+            guard paragraph != revealedRange || link != previousLink else { return }
             let previous = revealedRange
             revealedRange = paragraph
             let length = storage.length
@@ -286,20 +302,191 @@ final class UgoTextView: NSTextView {
         case .ignored:
             return true
         case .edit(let change):
-            breakUndoCoalescing()
-            guard shouldChangeText(in: change.range, replacementString: change.replacement) else { return true }
-            storage.replaceCharacters(in: change.range, with: change.replacement)
-            didChangeText()
-            setSelectedRange(change.selection)
-            scrollRangeToVisible(change.selection)
+            replace(change.range, with: change.replacement, select: change.selection)
             return true
         }
     }
 
+    /// One undoable edit, then the selection.
+    private func replace(_ range: NSRange, with replacement: String, select selection: NSRange) {
+        guard let storage = textStorage else { return }
+        breakUndoCoalescing()
+        guard shouldChangeText(in: range, replacementString: replacement) else { return }
+        storage.replaceCharacters(in: range, with: replacement)
+        didChangeText()
+        setSelectedRange(selection)
+        scrollRangeToVisible(selection)
+    }
+
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        if event.modifierFlags.contains(.command), let link = link(at: point) {
+            Self.open(link.url)
+            return
+        }
         if toggleCheckbox(at: point) { return }
         super.mouseDown(with: event)
+    }
+
+    // MARK: Links
+
+    private var linkPopover: LinkPopover?
+    private var hoveredLink: NSRange?
+
+    /// Pasting a URL over selected text turns the text into a link.
+    override func paste(_ sender: Any?) {
+        let selection = selectedRange()
+        let ns = string as NSString
+        guard selection.length > 0, !hasMarkedText(),
+              let url = NSPasteboard.general.string(forType: .string).flatMap(Self.linkURL),
+              let label = Self.linkLabel(ns.substring(with: selection)) else { return super.paste(sender) }
+        let markdown = "[\(label)](\(url))"
+        replace(selection, with: markdown, select: NSRange(location: selection.location + (markdown as NSString).length, length: 0))
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if window?.firstResponder === self, flags == .command, event.charactersIgnoringModifiers == "k" {
+            editLink()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    /// ⌘K: asks for a URL and links the selection, or changes the link the caret is in.
+    /// An empty URL on an existing link removes the link and keeps its text.
+    func editLink() {
+        guard !hasMarkedText() else { return }
+        let ns = string as NSString
+        let selection = selectedRange()
+        let existing = MarkdownHighlighter.link(in: ns, at: selection.location)
+            ?? (selection.length > 0 ? MarkdownHighlighter.link(in: ns, at: NSMaxRange(selection)) : nil)
+        if existing == nil, selection.length > 0, Self.linkLabel(ns.substring(with: selection)) == nil { return NSSound.beep() }
+        let clipboard = NSPasteboard.general.string(forType: .string).flatMap(Self.linkURL)
+        let anchor = existing?.label ?? selection
+        var rect = firstRect(forCharacterRange: anchor, actualRange: nil)
+        if let window {
+            rect = convert(window.convertFromScreen(rect), from: nil)
+        }
+        if rect.width < 1 { rect.size.width = 1 }
+        let popover = LinkPopover(url: existing?.url ?? clipboard ?? "", editing: existing != nil)
+        popover.onCommit = { [weak self] typed in
+            guard let self else { return }
+            let current = self.string as NSString
+            if let existing {
+                // The text may have changed under the popover; only touch the link if it is still there.
+                guard NSMaxRange(existing.range) <= current.length,
+                      current.substring(with: existing.range) == ns.substring(with: existing.range) else { return }
+                let label = current.substring(with: existing.label)
+                let replacement = typed.isEmpty ? label : "[\(label)](\(Self.linkURL(typed) ?? typed))"
+                self.replace(existing.range, with: replacement, select: NSRange(location: existing.range.location + (replacement as NSString).length, length: 0))
+            } else {
+                guard !typed.isEmpty, NSMaxRange(selection) <= current.length else { return }
+                let url = Self.linkURL(typed) ?? typed
+                let label = selection.length > 0 ? current.substring(with: selection) : url
+                let markdown = "[\(label)](\(url))"
+                self.replace(selection, with: markdown, select: NSRange(location: selection.location + (markdown as NSString).length, length: 0))
+            }
+        }
+        popover.onClose = { [weak self] in
+            guard let self else { return }
+            self.linkPopover = nil
+            self.window?.makeFirstResponder(self)
+        }
+        linkPopover = popover
+        popover.show(relativeTo: rect, of: self)
+    }
+
+    /// A URL to link to, or nil when the text isn't one. Bare `www.` addresses get https.
+    static func linkURL(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else { return nil }
+        var url = trimmed
+        if url.lowercased().hasPrefix("www.") { url = "https://" + url }
+        guard let scheme = URL(string: url)?.scheme?.lowercased(),
+              ["http", "https", "mailto", "ftp", "file"].contains(scheme) || url.contains("://") else { return nil }
+        return url.replacingOccurrences(of: "(", with: "%28").replacingOccurrences(of: ")", with: "%29")
+    }
+
+    /// Selected text that can sit inside `[...]`: one line, no brackets.
+    private static func linkLabel(_ text: String) -> String? {
+        guard !text.isEmpty, text.rangeOfCharacter(from: CharacterSet(charactersIn: "[]\n\r")) == nil else { return nil }
+        return text
+    }
+
+    static func open(_ url: String) {
+        let full = url.contains(":") ? url : "https://" + url
+        guard let target = URL(string: full) else { return NSSound.beep() }
+        NSWorkspace.shared.open(target)
+    }
+
+    /// The link whose label is drawn under the point, in view coordinates.
+    private func link(at point: NSPoint) -> (label: NSRange, url: String)? {
+        guard let storage = textStorage, storage.length > 0,
+              let layout = textLayoutManager, let content = layout.textContentManager else { return nil }
+        let index = characterIndexForInsertion(at: point)
+        let inContainer = CGPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
+        for i in [index, index - 1] where i >= 0 && i < storage.length {
+            var label = NSRange()
+            let line = (storage.string as NSString).lineRange(for: NSRange(location: i, length: 0))
+            guard let url = storage.attribute(.ugoLink, at: i, longestEffectiveRange: &label, in: line) as? String,
+                  let start = content.location(content.documentRange.location, offsetBy: label.location),
+                  let end = content.location(start, offsetBy: label.length),
+                  let range = NSTextRange(location: start, end: end) else { continue }
+            var hit = false
+            layout.enumerateTextSegments(in: range, type: .standard, options: []) { _, frame, _, _ in
+                hit = frame.contains(inContainer)
+                return !hit
+            }
+            if hit { return (label, url) }
+        }
+        return nil
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if !trackingAreas.contains(where: { $0.owner === self && $0.userInfo?["ugoLinks"] != nil }) {
+            addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: ["ugoLinks": true]))
+        }
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        updateHover(at: convert(event.locationInWindow, from: nil), command: event.modifierFlags.contains(.command))
+    }
+
+    override func flagsChanged(with event: NSEvent) {
+        super.flagsChanged(with: event)
+        guard let window else { return }
+        updateHover(at: convert(window.mouseLocationOutsideOfEventStream, from: nil), command: event.modifierFlags.contains(.command))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        setHoveredLink(nil)
+    }
+
+    /// Darkens the underline of the link under the pointer; with ⌘ held the pointer becomes a hand.
+    private func updateHover(at point: NSPoint, command: Bool) {
+        let link = link(at: point)
+        setHoveredLink(link?.label)
+        if link != nil, command { NSCursor.pointingHand.set() }
+    }
+
+    private func setHoveredLink(_ range: NSRange?) {
+        guard range != hoveredLink, let layout = textLayoutManager, let content = layout.textContentManager else { return }
+        func textRange(_ r: NSRange) -> NSTextRange? {
+            guard let start = content.location(content.documentRange.location, offsetBy: r.location),
+                  let end = content.location(start, offsetBy: r.length) else { return nil }
+            return NSTextRange(location: start, end: end)
+        }
+        if let old = hoveredLink, NSMaxRange(old) <= (string as NSString).length, let r = textRange(old) {
+            layout.removeRenderingAttribute(.underlineColor, for: r)
+        }
+        hoveredLink = range
+        if let range, let r = textRange(range), let theme = (delegate as? MarkdownEditor.Coordinator)?.highlighter.theme {
+            layout.addRenderingAttribute(.underlineColor, value: theme.linkUnderlineHover, for: r)
+        }
     }
 
     private func toggleCheckbox(at point: NSPoint) -> Bool {
@@ -318,6 +505,69 @@ final class UgoTextView: NSTextView {
         let inner = NSRange(location: innerStart, length: 1)
         insertText(done ? " " : "x", replacementRange: inner)
         return true
+    }
+}
+
+/// The URL field ⌘K opens under the selection. Return links, Esc or a click away cancels.
+@MainActor
+final class LinkPopover: NSObject, NSTextFieldDelegate, NSPopoverDelegate {
+    var onCommit: ((String) -> Void)?
+    var onClose: (() -> Void)?
+    private let popover = NSPopover()
+    private let field = NSTextField()
+
+    init(url: String, editing: Bool) {
+        super.init()
+        field.stringValue = url
+        field.placeholderString = "Paste or type a link"
+        field.font = .systemFont(ofSize: 13)
+        field.bezelStyle = .roundedBezel
+        field.focusRingType = .none
+        field.delegate = self
+        field.translatesAutoresizingMaskIntoConstraints = false
+        let hint = NSTextField(labelWithString: editing ? "↩ to save, empty to remove the link" : "↩ to link, esc to cancel")
+        hint.font = .systemFont(ofSize: 11)
+        hint.textColor = .secondaryLabelColor
+        let stack = NSStackView(views: [field, hint])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        stack.edgeInsets = NSEdgeInsets(top: 10, left: 10, bottom: 8, right: 10)
+        field.widthAnchor.constraint(equalToConstant: 300).isActive = true
+        let controller = NSViewController()
+        controller.view = stack
+        popover.contentViewController = controller
+        popover.behavior = .transient
+        popover.animates = false
+        popover.delegate = self
+    }
+
+    func show(relativeTo rect: NSRect, of view: NSView) {
+        popover.show(relativeTo: rect, of: view, preferredEdge: .maxY)
+        field.window?.makeFirstResponder(field)
+        field.currentEditor()?.selectAll(nil)
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        switch selector {
+        case #selector(NSResponder.insertNewline(_:)):
+            let typed = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let commit = onCommit
+            onCommit = nil
+            popover.close()
+            commit?(typed)
+            return true
+        case #selector(NSResponder.cancelOperation(_:)):
+            onCommit = nil
+            popover.close()
+            return true
+        default:
+            return false
+        }
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        onClose?()
     }
 }
 
@@ -402,6 +652,8 @@ struct MarkdownEditor: UIViewRepresentable {
         var onFocus: (@MainActor () -> Void)?
         private var pendingEdit: (range: NSRange, forceToEnd: Bool)?
         private var revealedRange: NSRange?
+        /// The link the caret is inside, whose brackets and URL are shown.
+        private var revealedLink: NSRange?
 
         init(text: Binding<String>, theme: MarkdownTheme) {
             self.text = text
@@ -423,7 +675,18 @@ struct MarkdownEditor: UIViewRepresentable {
         func highlightAll() {
             guard let textView else { return }
             revealedRange = caretParagraph()
+            trackCaret()
             highlighter.highlightAll(textView.textStorage, revealed: revealedRange)
+        }
+
+        /// Hands the caret to the highlighter and returns the link it is inside.
+        @discardableResult
+        private func trackCaret() -> NSRange? {
+            guard let textView else { return nil }
+            let caret = textView.selectedRange.location
+            highlighter.caret = caret
+            revealedLink = MarkdownHighlighter.link(in: (textView.text ?? "") as NSString, at: caret)?.range
+            return revealedLink
         }
 
         func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText replacement: String) -> Bool {
@@ -439,6 +702,7 @@ struct MarkdownEditor: UIViewRepresentable {
             lastPushed = string
             text.wrappedValue = string
             revealedRange = caretParagraph()
+            trackCaret()
             if let edit = pendingEdit {
                 highlighter.highlight(textView.textStorage, editedRange: edit.range, forceToEnd: edit.forceToEnd, revealed: revealedRange)
             } else {
@@ -449,7 +713,9 @@ struct MarkdownEditor: UIViewRepresentable {
 
         func textViewDidChangeSelection(_ textView: UITextView) {
             let paragraph = caretParagraph()
-            guard paragraph != revealedRange else { return }
+            let previousLink = revealedLink
+            let link = trackCaret()
+            guard paragraph != revealedRange || link != previousLink else { return }
             let previous = revealedRange
             revealedRange = paragraph
             let storage = textView.textStorage
