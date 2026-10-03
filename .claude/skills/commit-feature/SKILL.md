@@ -29,8 +29,12 @@ Do not commit work that does not build.
    imperative and under 70 characters (`Merge folders and notes into one sidebar`),
    then a short body on what changed and why. End it with the attribution
    lines the session gives for commits.
-4. Bring in any commits pushed meanwhile: `git pull --rebase origin main`.
-   Resolve conflicts, rebuild if the rebase touched Swift files.
+4. Bring in any commits pushed meanwhile: `git fetch origin`, and only if
+   `git status -sb` shows `main` behind `origin/main`, run
+   `git pull --rebase --autostash origin main`. The `--autostash` matters:
+   other sessions usually have uncommitted edits in the tree, and a plain
+   rebase refuses to run. Resolve conflicts, rebuild if the rebase touched
+   Swift files.
 5. Push: `git push origin main`.
 6. Tell the user the commit hash and its first line.
 
