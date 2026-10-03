@@ -107,7 +107,7 @@ or Open in Split opens the note in a pane of its own: up to three columns
 side by side, then a second pane under each column, six panes at most. Both
 shortcuts act on the highlighted note, so you can arrow to a note and open
 it beside the one you are reading. Each pane has its own tabs, and the pane
-whose active tab is tinted is the one the list and the keyboard act on. A
+whose active tab is underlined in colour is the one the list and the keyboard act on. A
 note is open in one place at a time, so opening it again just goes there.
 Closing a pane's last tab closes the pane. Drag the hairline between panes
 to resize them; the panes keep their proportions when the window or the

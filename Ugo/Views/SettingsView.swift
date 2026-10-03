@@ -279,7 +279,10 @@ private struct ThemePreview: View {
             .background(Color(hex: palette.side))
             hairline
             VStack(alignment: .leading, spacing: 5) {
-                RoundedRectangle(cornerRadius: 2).fill(Color(hex: palette.tabActive)).frame(width: 26, height: 6)
+                VStack(spacing: 1.5) {
+                    RoundedRectangle(cornerRadius: 1).fill(Color(hex: palette.text)).frame(width: 18, height: 3)
+                    Capsule().fill(Color(hex: palette.accent)).frame(width: 24, height: 1.5)
+                }
                 RoundedRectangle(cornerRadius: 1).fill(Color(hex: palette.heading)).frame(width: 34, height: 4)
                 checkbox(done: true, width: 0.7)
                 checkbox(done: false, width: 0.55)

@@ -57,6 +57,7 @@ struct EditorPaneView: View {
     let isFocused: Bool
     /// The top-left pane makes room for the traffic lights when the side panels are hidden.
     let isLeadingCorner: Bool
+    @Environment(\.palette) private var palette
 
     var body: some View {
         let inset = isLeadingCorner && !appState.panesVisible
@@ -68,9 +69,17 @@ struct EditorPaneView: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 34)
-            .padding(.leading, inset ? 84 : 18)
+            .frame(height: 48)
+            .padding(.leading, inset ? 84 : 10)
             .padding(.trailing, 12)
+            // The hairline the active tab's underline sits on.
+            .background(alignment: .bottom) {
+                if !appState.zenMode {
+                    Rectangle()
+                        .fill(palette.map { Color(hex: $0.hairline) } ?? Color.primary.opacity(0.1))
+                        .frame(height: 1)
+                }
+            }
             if let id = pane.activeNoteID, let note = store.notes[id] {
                 NoteEditorView(note: note, paneID: pane.id, initialContent: store.content(of: id))
                     .id(note.id)
@@ -82,7 +91,7 @@ struct EditorPaneView: View {
     }
 }
 
-/// The pane's tabs, packed from the left. The focused pane's active tab is tinted with the accent colour.
+/// The pane's tabs, packed from the left. The focused pane's active tab is underlined in the accent colour.
 private struct TabStrip: View {
     @Environment(NotesStore.self) private var store
     @Environment(AppState.self) private var appState
@@ -113,12 +122,14 @@ private struct TabStrip: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .clipped()
     }
 }
 
 /// A title, italic while the tab is a preview, with a close button on hover.
+/// The active tab is underlined on the strip's bottom edge: accent in the
+/// focused pane, grey in the others.
 /// The tab is as wide as its title, up to a cap, so tabs sit next to each other.
 private struct TabItem: View {
     let title: String
@@ -133,29 +144,34 @@ private struct TabItem: View {
 
     var body: some View {
         HugWidth(upTo: 220) {
-            HStack(spacing: 4) {
+            HStack(spacing: 8) {
                 Text(title)
-                    .font(.system(size: 13, weight: isActive ? .medium : .regular))
+                    .font(.system(size: 14, weight: isActive ? .semibold : .regular))
                     .italic(isPreview)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .foregroundStyle(isActive ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                    .foregroundStyle(isActive || hovering ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                 Button(action: close) {
                     Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .bold))
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.secondary)
-                        .frame(width: 16, height: 16)
+                        .frame(width: 20, height: 20)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .opacity(hovering || isActive ? 1 : 0)
                 .help("Close tab (⌘W)")
             }
-            .padding(.leading, 10)
-            .padding(.trailing, 5)
-            .padding(.vertical, 5)
-            .background(background, in: RoundedRectangle(cornerRadius: 7))
-            .contentShape(RoundedRectangle(cornerRadius: 7))
+            .padding(.leading, 14)
+            .padding(.trailing, 7)
+            .frame(maxHeight: .infinity)
+            .overlay(alignment: .bottom) {
+                Capsule()
+                    .fill(underline)
+                    .frame(height: 2)
+                    .padding(.horizontal, 10)
+            }
+            .contentShape(Rectangle())
         }
         .onHover { hovering = $0 }
         .onTapGesture {
@@ -177,12 +193,12 @@ private struct TabItem: View {
         .help(isPreview ? "Preview: the next note you click replaces it. Double-click or ⌘/ to keep it open." : title)
     }
 
-    private var background: Color {
+    private var underline: Color {
         if isActive {
-            if let palette { return isFocused ? Color(hex: palette.tabActive) : Color(hex: palette.selection).opacity(0.6) }
-            return isFocused ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.08)
+            if let palette { return isFocused ? Color(hex: palette.accent) : Color(hex: palette.checkboxBorder) }
+            return isFocused ? Color.accentColor : Color.primary.opacity(0.25)
         }
-        return hovering ? Color.primary.opacity(0.05) : .clear
+        return hovering ? Color.primary.opacity(0.18) : .clear
     }
 }
 
