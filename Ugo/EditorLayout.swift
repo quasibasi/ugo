@@ -289,6 +289,13 @@ struct EditorLayout: Hashable, Codable {
         self[pane.id] = pane
     }
 
+    /// Makes the focused pane's tab at `index` active, if it has one there.
+    mutating func selectTab(at index: Int) {
+        guard var pane = focusedPane, pane.tabs.indices.contains(index) else { return }
+        pane.activeTabID = pane.tabs[index].id
+        self[pane.id] = pane
+    }
+
     mutating func close(_ tabID: String, in paneID: String) {
         guard var pane = self[paneID] else { return }
         pane.remove(tabID)

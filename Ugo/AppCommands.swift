@@ -75,6 +75,10 @@ struct AppCommands: Commands {
                 .keyboardShortcut("]", modifiers: [.command, .shift])
             Button("Previous Tab") { appState.layout.selectTab(offset: -1) }
                 .keyboardShortcut("[", modifiers: [.command, .shift])
+            ForEach(1..<10) { n in
+                Button("Tab \(n)") { appState.layout.selectTab(at: n - 1) }
+                    .keyboardShortcut(KeyEquivalent(Character(String(n))), modifiers: .option)
+            }
         }
         CommandMenu("Favourites") {
             let favorites = store.favorites

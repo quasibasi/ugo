@@ -53,6 +53,7 @@ same folder are skipped.
 | Close the tab | ⌘W |
 | Close the window | ⇧⌘W |
 | Next or previous tab in the pane | ⇧⌘] and ⇧⌘[ |
+| First to ninth tab in the pane | ⌥1 to ⌥9 |
 | Show or hide the sidebar | ⌘\ |
 | Zen mode: the note alone fills the window, and back | ⌘↩ |
 | Section zen: only the `#` or `##` section the caret is in, and back | ⇧⌘↩, Esc to leave |
