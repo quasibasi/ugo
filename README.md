@@ -128,6 +128,26 @@ start of an item turns it into plain text. Numbers are always consecutive
 and are rewritten in the Markdown after each of these keys. Nested levels
 count 1, a, i.
 
+Columns sit side by side, as in Notion. Type `/columns` on a line of its
+own and press ↩ for two, or `/3 columns` (also `/3col`, `/columns 4`) for
+up to six. In the Markdown a block of columns is
+
+```
+::: columns
+First column
++++
+Second column
+:::
+```
+
+and any of it can be typed by hand; a block counts once it is closed.
+Each column is edited in place and holds any Markdown. ↑ and ↓ move
+between the note and the column under the caret, ← and → at either end
+of a column move to the next one, and ⌫ in an empty column takes it out;
+with one column left, its text goes back into the note. Headings inside
+columns don't start sections or slides, and slides show the columns one
+after another.
+
 Settings → General has five themes, each shown as a small picture of the
 window: System follows the macOS appearance, Paper is always light, and
 Midnight, Ugo (graphite with the logo's red) and Ink are dark. A theme
@@ -168,6 +188,8 @@ Ugo/
   Markdown/
     MarkdownHighlighter.swift   styling over NSMutableAttributedString, shared by both platforms
     MarkdownEditor.swift        NSTextView (macOS) and UITextView (iOS) wrappers
+    ColumnBlocks.swift          finds `::: columns` blocks in the Markdown
+    ColumnsOverlay.swift        lays a block's column text views over its hidden lines (macOS)
   Presentation/
     SlideDeck.swift       cuts a note into slides at its # and ## headings
     Presentation.swift    the full-screen slide window (macOS)

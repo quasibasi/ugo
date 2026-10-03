@@ -178,6 +178,11 @@ final class MarkdownHighlighter {
     private(set) var theme: MarkdownTheme
     /// The caret location. A link shows its brackets and URL only while the caret is inside it.
     var caret: Int?
+    /// The note's blocks of columns. Their lines are hidden: the editor lays
+    /// the columns over the `::: columns` line, which is made as tall as they are.
+    var columnBlocks: [ColumnBlocks.Block] = []
+    /// How tall each block's columns are, in the order of `columnBlocks`.
+    var columnHeights: [CGFloat] = []
     private var indentStyles: [String: NSParagraphStyle] = [:]
 
     init(theme: MarkdownTheme) {
@@ -250,7 +255,7 @@ final class MarkdownHighlighter {
         var inFence = false
         var fenceStart = 0
         ns.enumerateSubstrings(in: NSRange(location: 0, length: range.location), options: [.byLines, .substringNotRequired]) { _, lineRange, _, _ in
-            if Self.isFence(ns, lineRange) {
+            if Self.isFence(ns, lineRange), self.columnBlock(containing: lineRange.location) == nil {
                 inFence.toggle()
                 if inFence { fenceStart = lineRange.location }
             }
@@ -266,7 +271,7 @@ final class MarkdownHighlighter {
 
     // MARK: Fences
 
-    static func isFence(_ ns: NSString, _ lineRange: NSRange) -> Bool {
+    nonisolated static func isFence(_ ns: NSString, _ lineRange: NSRange) -> Bool {
         var i = lineRange.location
         let end = NSMaxRange(lineRange)
         var spaces = 0
@@ -301,11 +306,50 @@ final class MarkdownHighlighter {
         var inFence = false
         var numbering = listNumbering(ns, before: range.location)
         ns.enumerateSubstrings(in: range, options: [.byLines, .substringNotRequired]) { _, lineRange, enclosingRange, _ in
+            if let block = self.columnBlock(containing: lineRange.location) {
+                self.hideColumnLine(storage, block: block, lineRange: lineRange, enclosingRange: enclosingRange)
+                numbering.reset()
+                return
+            }
             let isRevealed = revealed.map { NSLocationInRange($0.location, enclosingRange) || ($0.location == NSMaxRange(enclosingRange) && enclosingRange.length == lineRange.length) } ?? false
             self.styleLine(storage, string: string, ns: ns, lineRange: lineRange, revealed: isRevealed, inFence: &inFence, numbering: &numbering)
         }
         storage.endEditing()
     }
+
+    // MARK: Columns
+
+    /// The index of the block of columns whose lines include `location`.
+    func columnBlock(containing location: Int) -> Int? {
+        guard !columnBlocks.isEmpty else { return nil }
+        return columnBlocks.firstIndex { location >= $0.range.location && location <= NSMaxRange($0.range) }
+    }
+
+    /// The `::: columns` line stands as tall as the columns laid over it; the
+    /// other lines of the block take no room at all.
+    private func hideColumnLine(_ storage: NSMutableAttributedString, block: Int, lineRange: NSRange, enclosingRange: NSRange) {
+        let style: NSParagraphStyle
+        if lineRange.location == columnBlocks[block].opening.location {
+            let height = block < columnHeights.count ? columnHeights[block] : theme.paragraph.minimumLineHeight
+            let p = NSMutableParagraphStyle()
+            p.minimumLineHeight = height
+            p.maximumLineHeight = height
+            p.paragraphSpacing = theme.paragraph.paragraphSpacing
+            style = p
+        } else {
+            style = hiddenLine
+        }
+        var attributes = theme.hiddenMarker
+        attributes[.paragraphStyle] = style
+        storage.setAttributes(attributes, range: enclosingRange)
+    }
+
+    private lazy var hiddenLine: NSParagraphStyle = {
+        let p = NSMutableParagraphStyle()
+        p.minimumLineHeight = 0.01
+        p.maximumLineHeight = 0.01
+        return p
+    }()
 
     /// The numbering state at `location`, from the list lines just above it.
     private func listNumbering(_ ns: NSString, before location: Int) -> ListNumbering {

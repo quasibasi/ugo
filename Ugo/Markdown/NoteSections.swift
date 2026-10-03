@@ -1,16 +1,23 @@
 import Foundation
 
 /// A note cut at its `#` and `##` headings, the way slides and section zen
-/// see it. Deeper headings stay inside a section, and headings in fenced code don't count.
+/// see it. Deeper headings stay inside a section, and headings in fenced code
+/// or in columns don't count.
 enum NoteSections {
     /// Where each `#` or `##` heading line starts, in UTF-16 units.
     static func headingStarts(in markdown: String) -> [Int] {
         let ns = markdown as NSString
         var starts: [Int] = []
+        let columns = ColumnBlocks.blocks(in: ns)
         var inFence = false
         var location = 0
         while location < ns.length {
             let lineRange = ns.lineRange(for: NSRange(location: location, length: 0))
+            // A heading inside a column belongs to the column, not to the note's outline.
+            if let block = columns.first(where: { NSLocationInRange(lineRange.location, $0.range) }) {
+                location = max(NSMaxRange(lineRange), NSMaxRange(block.range))
+                continue
+            }
             let line = ns.substring(with: lineRange)
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
