@@ -523,7 +523,7 @@ final class ColumnEditor {
     var onChange: ((String) -> Void)?
     /// Shown while the column is empty, so it can be found. A label, since
     /// overriding the text view's drawing would turn TextKit 2 off.
-    private let placeholder = NSTextField(labelWithString: "Empty column")
+    private let placeholder = PassThroughLabel(labelWithString: "Empty column")
 
     init(text: String, theme: MarkdownTheme) {
         let relay = Relay()
@@ -597,6 +597,11 @@ final class ColumnEditor {
             target?.onChange?(text)
         }
     }
+}
+
+/// A label that clicks go through, to the text view under it.
+private final class PassThroughLabel: NSTextField {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 /// The row of a block's column text views, laid over its `::: columns` line.
