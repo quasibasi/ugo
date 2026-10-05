@@ -92,6 +92,14 @@ empty space in the sidebar for a new top-level folder. Rename Folder is
 also in the Edit menu. The name turns into a text field: ↩ keeps it, Esc
 backs out, and a name another folder beside it already has gets a beep.
 
+To move a note or a folder, drag it onto another folder in the sidebar,
+or onto empty space to put it at the top level. Dropping on a note moves
+into that note's folder. A closed folder opens if the drag rests on it for
+a moment. Folders take everything inside them along, and can't go into
+themselves. Move To in the right-click menu does the same without the
+mouse. A name already used where it lands gets a number, as a new
+folder's would.
+
 To delete a folder, pick Move to Trash from its right-click menu or the
 Edit menu, or press ⌫ with the folder highlighted in the sidebar. An empty folder goes
 at once; one with notes asks first. Its notes and subfolders go with it:

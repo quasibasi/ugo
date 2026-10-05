@@ -86,6 +86,10 @@ struct NoteEditorView: View {
                 commitTitle()
             }
         }
+        // Renamed from elsewhere, as when a move numbers a clashing title.
+        .onChange(of: note.title) {
+            if !titleFocused { title = note.title }
+        }
         .onChange(of: appState.titleFocusRequest) {
             guard isInFocusedPane else { return }
             focus(.title)

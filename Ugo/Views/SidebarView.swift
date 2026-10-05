@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 #if os(macOS)
 import AppKit
 #endif
@@ -13,6 +14,8 @@ enum SidebarItem: Hashable {
 /// listing its subfolders and then its notes, newest first. The note open
 /// in the focused pane is highlighted. A click on a note shows it in the
 /// pane's preview tab; the arrow keys only move the highlight and Return opens.
+/// Notes and folders are dragged onto a folder to move them into it, or onto
+/// empty space to move them to the top level.
 struct SidebarView: View {
     @Environment(NotesStore.self) private var store
     @Environment(AppState.self) private var appState
@@ -20,6 +23,18 @@ struct SidebarView: View {
     @FocusState private var focused: Bool
     /// The row the arrow keys act on.
     @State private var cursor: SidebarItem?
+    /// The row being dragged, if the drag started here.
+    @State private var dragged: SidebarItem?
+    /// Where a drag is hovering: the row under the pointer (nil for empty space)
+    /// and the folder a drop there would move into ("" for the top level).
+    @State private var dropHover: DropHover?
+
+    struct DropHover: Equatable {
+        let row: SidebarItem?
+        let folderID: String
+    }
+
+    static let dragType = UTType(exportedAs: "app.ugo.sidebar-item")
 
     private struct Row: Identifiable {
         enum Kind {
@@ -80,6 +95,15 @@ struct SidebarView: View {
                 .contentShape(Rectangle())
                 .contextMenu {
                     Button("New Folder") { appState.createFolder(in: nil, store: store) }
+                }
+                .onDrop(of: [Self.dragType], delegate: dropDelegate(row: nil, folderID: ""))
+                .overlay {
+                    if dropHover?.folderID == "" {
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(dropColor, lineWidth: 1.5)
+                            .padding(4)
+                            .allowsHitTesting(false)
+                    }
                 }
                 .focusable()
                 .focusEffectDisabled()
@@ -168,7 +192,12 @@ struct SidebarView: View {
                 depth: row.depth,
                 isExpanded: appState.expandedFolderIDs.contains(folder.id),
                 hasContents: folder.noteCount > 0 || folder.children != nil)
-                .background(cursor == row.id && focused ? subtleFill : .clear, in: RoundedRectangle(cornerRadius: 6))
+                .background(cursor == row.id && focused || dropHover?.folderID == folder.id ? subtleFill : .clear, in: RoundedRectangle(cornerRadius: 6))
+                .overlay {
+                    if dropHover?.folderID == folder.id {
+                        RoundedRectangle(cornerRadius: 6).strokeBorder(dropColor, lineWidth: 1.5)
+                    }
+                }
                 .contentShape(Rectangle())
                 .onTapGesture {
                     cursor = row.id
@@ -176,6 +205,8 @@ struct SidebarView: View {
                     appState.toggleExpanded(folder.id)
                     focused = true
                 }
+                .onDrag { dragProvider(for: row.id) }
+                .onDrop(of: [Self.dragType], delegate: dropDelegate(row: row.id, folderID: folder.id))
                 .contextMenu {
                     Button("New Note") {
                         appState.selectedFolderID = folder.id
@@ -183,6 +214,7 @@ struct SidebarView: View {
                     }
                     Button("New Folder Inside") { appState.createFolder(in: folder.id, store: store) }
                     Button("Rename") { appState.startRenaming(folder.id) }
+                    moveMenu(for: row.id)
                     Divider()
                     Button("Move to Trash", role: .destructive) { appState.requestTrashFolder(folder.id, store: store) }
                 }
@@ -208,6 +240,8 @@ struct SidebarView: View {
                 appState.show(note.id)
                 focused = true
             }
+            .onDrag { dragProvider(for: row.id) }
+            .onDrop(of: [Self.dragType], delegate: dropDelegate(row: row.id, folderID: note.folderID))
             .contextMenu {
                 Button("Open in New Tab") { appState.openInNewTab(note.id) }
                 Button("Open in Split") { appState.openInSplit(note.id) }
@@ -216,6 +250,7 @@ struct SidebarView: View {
                     appState.show(note.id)
                     appState.requestFocus(.title, in: note.id)
                 }
+                moveMenu(for: row.id)
                 Divider()
                 Button("Move to Trash", role: .destructive) { trash(note.id) }
             }
@@ -227,7 +262,100 @@ struct SidebarView: View {
         folderDepth < 0 ? 8 : FolderRow.nameLeading(depth: folderDepth)
     }
 
+    // MARK: Moving
+
+    /// Whether the item can go into the folder ("" for the top level).
+    private func canMove(_ item: SidebarItem?, into folderID: String) -> Bool {
+        switch item {
+        case .folder(let id): store.canMoveFolder(id, into: folderID.isEmpty ? nil : folderID)
+        case .note(let id): store.notes[id].map { $0.folderID != folderID && (folderID.isEmpty || store.folder(withID: folderID) != nil) } ?? false
+        case nil: false
+        }
+    }
+
+    /// Moves the item into the folder and opens that folder so it stays in sight.
+    @discardableResult
+    private func move(_ item: SidebarItem, into folderID: String) -> Bool {
+        let destination = folderID.isEmpty ? nil : folderID
+        let moved = switch item {
+        case .folder(let id): store.moveFolder(id, into: destination)
+        case .note(let id): store.moveNote(id, to: destination)
+        }
+        guard moved else { return false }
+        reveal(folder: folderID)
+        cursor = item
+        return true
+    }
+
+    private func dragProvider(for item: SidebarItem) -> NSItemProvider {
+        dragged = item
+        let id: String = switch item {
+        case .folder(let id): id
+        case .note(let id): id
+        }
+        return NSItemProvider(item: id as NSString, typeIdentifier: Self.dragType.identifier)
+    }
+
+    private func dropDelegate(row: SidebarItem?, folderID: String) -> SidebarDrop {
+        SidebarDrop(
+            canDrop: { canMove(dragged, into: folderID) },
+            hover: { inside in
+                let here = DropHover(row: row, folderID: folderID)
+                if inside {
+                    // Only where a drop would do something; a note over its own folder shows nothing.
+                    guard canMove(dragged, into: folderID) else { dropHover = nil; return }
+                    dropHover = here
+                    openWhileHovering(folderID, row: row)
+                } else if dropHover == here {
+                    dropHover = nil
+                }
+            },
+            perform: {
+                dropHover = nil
+                defer { dragged = nil }
+                guard let item = dragged else { return false }
+                return move(item, into: folderID)
+            })
+    }
+
+    /// A closed folder held under a drag for a moment opens, so the drag can go deeper.
+    private func openWhileHovering(_ folderID: String, row: SidebarItem?) {
+        guard row == .folder(folderID), !appState.expandedFolderIDs.contains(folderID) else { return }
+        Task {
+            try? await Task.sleep(for: .milliseconds(700))
+            if dropHover?.row == row { appState.expandedFolderIDs.insert(folderID) }
+        }
+    }
+
+    /// The right-click menu's Move To: the top level and every folder, the ones the item cannot go to dimmed.
+    @ViewBuilder private func moveMenu(for item: SidebarItem) -> some View {
+        Menu("Move To") {
+            Button("Top Level") { move(item, into: "") }
+                .disabled(!canMove(item, into: ""))
+            Divider()
+            ForEach(allFolders(), id: \.folder.id) { entry in
+                Button(String(repeating: "    ", count: entry.depth) + entry.folder.name) { move(item, into: entry.folder.id) }
+                    .disabled(!canMove(item, into: entry.folder.id))
+            }
+        }
+    }
+
+    /// Every folder in tree order, with its depth.
+    private func allFolders() -> [(folder: FolderItem, depth: Int)] {
+        var list: [(folder: FolderItem, depth: Int)] = []
+        func add(_ folder: FolderItem, depth: Int) {
+            list.append((folder, depth))
+            for child in folder.children ?? [] { add(child, depth: depth + 1) }
+        }
+        for folder in store.root?.children ?? [] { add(folder, depth: 0) }
+        return list
+    }
+
     // MARK: Colours
+
+    private var dropColor: Color {
+        palette.map { Color(hex: $0.accent) } ?? .accentColor
+    }
 
     private var highlightFill: Color {
         if let palette { return Color(hex: palette.highlight) }
@@ -350,6 +478,24 @@ struct SidebarView: View {
             if !appState.expandedFolderIDs.contains(folderID) { appState.expandedFolderIDs.insert(folderID) }
             current = store.parentID(ofFolder: folderID)
         }
+    }
+}
+
+/// A drop target in the sidebar: a folder row, a note row (its folder), or empty space (the top level).
+private struct SidebarDrop: DropDelegate {
+    let canDrop: () -> Bool
+    let hover: (Bool) -> Void
+    let perform: () -> Bool
+
+    func dropEntered(info: DropInfo) { hover(true) }
+    func dropExited(info: DropInfo) { hover(false) }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: canDrop() ? .move : .forbidden)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        canDrop() && perform()
     }
 }
 

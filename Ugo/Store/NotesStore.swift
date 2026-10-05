@@ -191,6 +191,62 @@ final class NotesStore {
         return true
     }
 
+    /// Whether `id` is `ancestor` itself or sits somewhere below it.
+    func isFolder(_ id: String, within ancestor: String) -> Bool {
+        var current = id
+        while !current.isEmpty {
+            if current == ancestor { return true }
+            current = folderParents[current] ?? ""
+        }
+        return false
+    }
+
+    /// Whether the folder can go into `parentID` (nil for the top level):
+    /// not into itself or a folder below it, and not where it already is.
+    func canMoveFolder(_ id: String, into parentID: String?) -> Bool {
+        let parent = parentID ?? ""
+        guard let current = folderParents[id], current != parent else { return false }
+        return parent.isEmpty || !isFolder(parent, within: id)
+    }
+
+    /// Moves the folder, with everything in it, into `parentID` (nil for the top
+    /// level). A name already taken there gets a number, as a new folder's does.
+    @discardableResult
+    func moveFolder(_ id: String, into parentID: String?) -> Bool {
+        guard canMoveFolder(id, into: parentID) else { return false }
+        let parent = parentID ?? ""
+        var descriptor = FetchDescriptor<Folder>(predicate: #Predicate { $0.uid == id })
+        descriptor.fetchLimit = 1
+        guard let folder = try? context.fetch(descriptor).first else { return false }
+        let taken = siblingFolderNames(in: parent)
+        var unique = folder.name
+        var counter = 2
+        while taken.contains(unique.lowercased()) {
+            unique = "\(folder.name) \(counter)"
+            counter += 1
+        }
+        folder.name = unique
+        folder.parentUID = parent.isEmpty ? nil : parent
+        persist("move the folder")
+        refresh()
+        return true
+    }
+
+    /// Moves the note into `folderID` (nil for the top level). It keeps its
+    /// modified date, so it sorts among the other notes as before; a title
+    /// already taken there gets a number.
+    @discardableResult
+    func moveNote(_ id: String, to folderID: String?) -> Bool {
+        let folder = folderID ?? ""
+        guard let item = notes[id], item.folderID != folder, folder.isEmpty || folderParents[folder] != nil,
+              let note = record(id) else { return false }
+        note.title = uniqueTitle(note.title, in: folder)
+        note.folderUID = folder.isEmpty ? nil : folder
+        persist("move the note")
+        refresh()
+        return true
+    }
+
     /// The folder's parent, nil for a top-level folder.
     func parentID(ofFolder id: String) -> String? {
         guard let parent = folderParents[id], !parent.isEmpty else { return nil }
