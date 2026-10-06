@@ -55,6 +55,7 @@ same folder are skipped.
 | Next or previous tab in the pane | ⇧⌘] and ⇧⌘[ |
 | First to ninth tab in the pane | ⌥1 to ⌥9 |
 | Show or hide the sidebar | ⌘\ |
+| Full width for the note in the focused pane, and back | ⌥⌘\ |
 | Zen mode: the note alone fills the window, and back | ⌘↩ |
 | Section zen: only the `#` or `##` section the caret is in, and back | ⇧⌘↩, Esc to leave |
 | Next or previous section in section zen | ⌥⌘↓ and ⌥⌘↑ |
@@ -135,6 +136,12 @@ a time. ⇥ and ⇧⇥ nest an item together with everything under it. ⌫ at th
 start of an item turns it into plain text. Numbers are always consecutive
 and are rewritten in the Markdown after each of these keys. Nested levels
 count 1, a, i.
+
+A note opens in a 640-point reading column. Full Width, in the ⋯ menu at
+the right end of the tab strip or with ⌥⌘\, spreads it across the pane
+with a 72-point margin each side, as in Notion. The choice is kept with
+the note, so it opens that way again, and never touches its Markdown. The
+same menu presents the note and adds it to the favourites or takes it out.
 
 Columns sit side by side, as in Notion. Type `/columns` on a line of its
 own and press ↩ for two, or `/3 columns` (also `/3col`, `/columns 4`) for

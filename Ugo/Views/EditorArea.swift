@@ -66,6 +66,9 @@ struct EditorPaneView: View {
                 // Zen mode keeps the empty strip to drag the window by, without the tabs.
                 if !appState.zenMode {
                     TabStrip(pane: pane, isFocused: isFocused)
+                    if let id = pane.activeNoteID, let note = store.notes[id] {
+                        NoteMenu(note: note, paneID: pane.id)
+                    }
                 }
             }
             .frame(maxWidth: .infinity)
@@ -88,6 +91,46 @@ struct EditorPaneView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// The ⋯ at the end of the tab strip: what can be done to the pane's note.
+private struct NoteMenu: View {
+    @Environment(NotesStore.self) private var store
+    @Environment(AppState.self) private var appState
+    let note: NoteItem
+    let paneID: String
+
+    var body: some View {
+        Menu {
+            Toggle("Full Width", isOn: Binding(
+                get: { note.fullWidth },
+                set: { store.setFullWidth(note.id, $0) }))
+            #if os(macOS)
+            Button("Present") {
+                appState.focusPane(paneID)
+                Presentation.start(appState: appState, store: store)
+            }
+            #endif
+            Divider()
+            if note.favoriteRank == nil {
+                Button("Add to Favourites") { store.addFavorite(note.id) }
+                    .disabled(store.favorites.count >= NotesStore.maxFavorites)
+            } else {
+                Button("Remove from Favourites") { store.removeFavorite(note.id) }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Note options")
     }
 }
 

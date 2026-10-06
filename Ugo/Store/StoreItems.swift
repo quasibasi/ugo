@@ -16,6 +16,7 @@ struct NoteItem: Identifiable, Hashable {
     let title: String
     var modifiedAt: Date
     var favoriteRank: Int?
+    var fullWidth = false
 }
 
 struct QuickOpenResult: Identifiable, Hashable {

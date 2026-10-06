@@ -14,6 +14,8 @@ final class Note {
     var trashedAt: Date?
     /// Position among the favourites, nil when the note is not one. The lowest opens with ⌘0.
     var favoriteRank: Int?
+    /// Shown across the whole pane instead of in the reading column.
+    var fullWidth: Bool = false
 
     init(title: String, content: String = "", folderUID: String?, createdAt: Date = .now, modifiedAt: Date = .now) {
         self.title = title

@@ -40,12 +40,12 @@ final class NotesStore {
     func refresh() {
         let folders = (try? context.fetch(FetchDescriptor<Folder>())) ?? []
         var descriptor = FetchDescriptor<Note>(predicate: #Predicate { $0.trashedAt == nil })
-        descriptor.propertiesToFetch = [\.uid, \.title, \.folderUID, \.modifiedAt, \.favoriteRank]
+        descriptor.propertiesToFetch = [\.uid, \.title, \.folderUID, \.modifiedAt, \.favoriteRank, \.fullWidth]
         let fetched = (try? context.fetch(descriptor)) ?? []
 
         var items: [String: NoteItem] = [:]
         for note in fetched {
-            items[note.uid] = NoteItem(id: note.uid, folderID: note.folderUID ?? "", title: note.title, modifiedAt: note.modifiedAt, favoriteRank: note.favoriteRank)
+            items[note.uid] = NoteItem(id: note.uid, folderID: note.folderUID ?? "", title: note.title, modifiedAt: note.modifiedAt, favoriteRank: note.favoriteRank, fullWidth: note.fullWidth)
         }
         notes = items
         folderNames = Dictionary(uniqueKeysWithValues: folders.map { ($0.uid, $0.name) })
@@ -292,7 +292,7 @@ final class NotesStore {
         guard !clash else { return nil }
         note.title = clean
         persist("rename the note")
-        let renamed = NoteItem(id: id, folderID: item.folderID, title: clean, modifiedAt: item.modifiedAt, favoriteRank: item.favoriteRank)
+        let renamed = NoteItem(id: id, folderID: item.folderID, title: clean, modifiedAt: item.modifiedAt, favoriteRank: item.favoriteRank, fullWidth: item.fullWidth)
         notes[id] = renamed
         return renamed
     }
@@ -304,6 +304,14 @@ final class NotesStore {
         persist("move the note to the trash")
         contents[id] = nil
         refresh()
+    }
+
+    /// Full width or the reading column. Not an edit, so the note keeps its place in the list.
+    func setFullWidth(_ id: String, _ on: Bool) {
+        guard let note = record(id), note.fullWidth != on else { return }
+        note.fullWidth = on
+        persist("change the note's width")
+        notes[id]?.fullWidth = on
     }
 
     // MARK: Favourites

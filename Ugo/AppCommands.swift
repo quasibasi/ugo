@@ -54,6 +54,14 @@ struct AppCommands: Commands {
                 .keyboardShortcut(.return, modifiers: .command)
                 .disabled(!appState.zenMode && appState.layout.focusedPane?.activeNoteID == nil)
             #endif
+            Toggle("Full Width", isOn: Binding(
+                get: { appState.layout.activeNoteID.flatMap { store.notes[$0]?.fullWidth } ?? false },
+                set: { on in
+                    guard let id = appState.layout.activeNoteID else { return }
+                    store.setFullWidth(id, on)
+                }))
+            .keyboardShortcut("\\", modifiers: [.command, .option])
+            .disabled(appState.layout.activeNoteID == nil)
             #if os(macOS)
             Button("Present") { Presentation.start(appState: appState, store: store) }
                 .keyboardShortcut("p", modifiers: [.command, .shift])

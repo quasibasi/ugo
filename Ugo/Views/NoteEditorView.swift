@@ -15,6 +15,8 @@ struct NoteEditorView: View {
     @Environment(\.palette) private var palette
 
     static let columnWidth: CGFloat = 640
+    /// The margin left and right of a full-width note.
+    static let fullWidthMargin: CGFloat = 72
 
     let note: NoteItem
     /// The pane this editor sits in; focus requests are only for the focused pane's editor.
@@ -34,6 +36,7 @@ struct NoteEditorView: View {
     /// again if it is still empty when section zen ends.
     @State private var addedHeading = false
     @FocusState private var titleFocused: Bool
+    @State private var paneWidth: CGFloat = 0
 
     init(note: NoteItem, paneID: String, initialContent: String) {
         self.note = note
@@ -43,6 +46,13 @@ struct NoteEditorView: View {
     }
 
     private var isInFocusedPane: Bool { appState.layout.focusedPaneID == paneID }
+
+    /// How wide the title and text run: the reading column, or for a
+    /// full-width note the pane less its margins, never narrower than the column.
+    private var textWidth: CGFloat {
+        guard note.fullWidth else { return Self.columnWidth }
+        return max(Self.columnWidth, paneWidth - 2 * Self.fullWidthMargin)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -64,17 +74,18 @@ struct NoteEditorView: View {
                             .fill(palette.map { Color(hex: $0.hairline) } ?? Color.primary.opacity(0.15))
                             .frame(height: 1)
                     }
-                    .frame(maxWidth: Self.columnWidth)
+                    .frame(maxWidth: textWidth)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 24)
             .padding(.top, 30)
             .padding(.bottom, 14)
-            MarkdownEditor(text: editorText, fontSize: fontSize, palette: palette, columnWidth: Self.columnWidth, focusToken: editorFocusToken, initialSelection: initialCaret, onEscape: leaveSectionOnEscape) {
+            MarkdownEditor(text: editorText, fontSize: fontSize, palette: palette, columnWidth: textWidth, focusToken: editorFocusToken, initialSelection: initialCaret, onEscape: leaveSectionOnEscape) {
                 appState.focusPane(paneID)
             }
             .id(editorGeneration)
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { paneWidth = $0 }
         .onChange(of: content) {
             dirty = true
             scheduleSave()
