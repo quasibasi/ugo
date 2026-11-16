@@ -71,7 +71,8 @@ struct EditorPaneView: View {
                     }
                 }
             }
-            .frame(maxWidth: .infinity)
+            // minWidth 0: never wider than the pane, however many tabs are open.
+            .frame(minWidth: 0, maxWidth: .infinity)
             .frame(height: 48)
             .padding(.leading, inset ? 84 : 10)
             .padding(.trailing, 12)
@@ -90,7 +91,7 @@ struct EditorPaneView: View {
                 Spacer(minLength: 0)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -165,7 +166,11 @@ private struct TabStrip: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        // Tabs keep their own widths, so many of them add up to more than the
+        // pane. A minimum of 0 takes the offered width instead of theirs; the
+        // ones past the edge are clipped rather than widening the pane and
+        // pushing the note off centre.
+        .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .clipped()
     }
 }
