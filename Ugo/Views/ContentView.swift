@@ -146,8 +146,6 @@ private struct WindowConfigurator: NSViewRepresentable {
     func updateNSView(_ nsView: ConfiguringView, context: Context) {}
 
     final class ConfiguringView: NSView {
-        private var didSizeWindow = false
-
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             guard let window else { return }
@@ -155,14 +153,6 @@ private struct WindowConfigurator: NSViewRepresentable {
             window.titlebarAppearsTransparent = true
             window.titleVisibility = .hidden
             window.styleMask.insert(.fullSizeContentView)
-            // Open filling the screen, leaving the menu bar and Dock visible.
-            if !didSizeWindow, let screen = window.screen ?? NSScreen.main {
-                didSizeWindow = true
-                let frame = screen.visibleFrame
-                DispatchQueue.main.async {
-                    window.setFrame(frame, display: true)
-                }
-            }
         }
     }
 }

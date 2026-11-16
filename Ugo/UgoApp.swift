@@ -25,7 +25,12 @@ struct UgoApp: App {
         }
         #if os(macOS)
         .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 1180, height: 760)
+        // Open filling the screen, leaving the menu bar and Dock visible. Sized
+        // before it shows, so nothing is laid out for a smaller window first.
+        .defaultWindowPlacement { _, context in
+            let area = context.defaultDisplay.visibleRect
+            return WindowPlacement(area.origin, size: area.size)
+        }
         #endif
 
         #if os(macOS)
